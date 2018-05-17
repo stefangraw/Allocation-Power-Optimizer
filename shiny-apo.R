@@ -1,6 +1,6 @@
 library(shiny)
 library(shinyjs)
-source("apo.R")
+library(parallel)
 
 server = function(input,output){
   # dynamic min for totalSampleSize
@@ -10,6 +10,7 @@ server = function(input,output){
   
   
   ## run program here
+  source("apo.R")
   
   runProgram <- eventReactive(input$goButton, {
     # hide("goButton")
