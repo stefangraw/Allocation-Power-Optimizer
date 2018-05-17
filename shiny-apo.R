@@ -1,6 +1,6 @@
 library(shiny)
 library(shinyjs)
-source("Simulate_t_posteriors_v08.R")
+source("apo.R")
 
 server = function(input,output){
   # dynamic min for totalSampleSize
