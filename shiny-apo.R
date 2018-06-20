@@ -1,19 +1,13 @@
 library(shiny)
 library(shinyjs)
 library(parallel)
+library(doParallel)
 
 server = function(input,output){
-  # dynamic min for totalSampleSize
-  # output$totalSampleSize <- renderUI({
-  #   numericInput(inputId = "totalSampleSize", label = "Total sample size", value = NA, step = 1, min = input$numberOfArms*4)
-  # })
-  
-  
-  ## run program here
   source("apo.R")
   
+  ## run program here
   runProgram <- eventReactive(input$goButton, {
-    # hide("goButton")
     randomSeed = sample(1:1000000, 1)
     out = list()
     runTimeStart = Sys.time()
@@ -40,6 +34,11 @@ server = function(input,output){
       )
     })
     runTimeStop = difftime(Sys.time(), runTimeStart, units = "auto")
+    
+    output$alphaCI <- renderText({HTML(paste0("\nFor threshold of ",round(sobj$results.best$threshold,3)," the ","<b>"," simulated type I error rate (90% CI)","</b>", 
+                                              " is ", "&alpha;" ," = ", input$alpha, " (", round(sobj$results.best$alpha.low, 3),
+                                              ", ", round(sobj$results.best$alpha.high, 3), ").\n", sep = ""))})
+    
     output$powerPlot <- renderPlot({plot.sim(sobj)})
     
     #Bonf-adjusted t-test (this needs to use all arms)
@@ -60,7 +59,7 @@ server = function(input,output){
     freqTest_bestArmKnow = power.t.test(n = floor(input$totalSampleSize/2), delta = max(mus), alternative = "one.sided", sig.level = input$alpha)
     
     table1 = data.frame(
-      "Power" = c(round(sobj$results.best$power,3),  round(freqTest_bonf,3), round(freqTest_bestArmKnow$power,3)), 
+      "Power (90% CI)" = c(paste(round(sobj$results.best$power,3), " (", round(sobj$results.best$power.low,3), ", ", round(sobj$results.best$power.high,3), ")", sep = ""),  round(freqTest_bonf,3), round(freqTest_bestArmKnow$power,3)), 
       "N per arm (Stage 1)" = c(sobj$results.best$n.per.arm.I, " ", " "),
       "Additional N per arm (Stage 2)" = c(as.integer(sobj$results.best$n.per.arm.II), " ", " "), 
       "Total N" = as.integer(c(sobj$results.best$n.total, floor(input$totalSampleSize/input$numberOfArms)*input$numberOfArms, floor(input$totalSampleSize/2)*2)), 
@@ -68,7 +67,7 @@ server = function(input,output){
       "Pr(Early stop: futility)" = c(round(sobj$results.best$pr.futility,3), " ", " "),
       "Pr(success, best arm wins)" = c(round(sobj$results.best$pr.best.tx.success,3)," ", " "),
       check.names = F)
-    rownames(table1) = c("Adaptive design", "Bonferroni adjusted t", "If best arm known")
+    rownames(table1) = c("Adaptive DTL design", "Bonferroni adjusted t", "If best arm known")
     
     logString = paste0(
       "Critical value alpha = ", input$alpha, "\n",
@@ -78,9 +77,7 @@ server = function(input,output){
         paste0("Effect size (one best arm) = ", ifelse(input$effectSize == 0, input$effectSizeCustom, input$effectSize), "\n")
       } else if(input$effectTrend == "linear"){
         paste0("Effect size (linear trend) = ", ifelse(input$effectSize == 0, input$effectSizeCustom, input$effectSize), "\n")
-      }, #else if(input$effectTrend == "custom"){
-      #   paste0("Custom = ", "coming XXXXX", "\n")
-      # },
+      }, 
       
       "H1 treatment means = ", paste(round(as.numeric(
         if(input$effectTrend == "oneBestArm"){
@@ -112,7 +109,7 @@ server = function(input,output){
   output$bestN <- renderTable({runProgram()[["table1"]]}, rownames = T, digits = 3)
   
   output$powerTable <- renderDataTable({data.frame(
-    Power = round(runProgram()[["sobj"]]$results.all$power,4), 
+    "Power (90% CI)" = paste0(round(runProgram()[["sobj"]]$results.all$power,4), " (", round(runProgram()[["sobj"]]$results.all$power.low,4), ", ", round(runProgram()[["sobj"]]$results.all$power.high,4), ")", sep = ""),
     "N per arm (Stage 1)" = runProgram()[["sobj"]]$results.all$n.per.arm.I, 
     "Additional N per arm (Stage 2)" = runProgram()[["sobj"]]$results.all$n.per.arm.II, 
     "Total N" = runProgram()[["sobj"]]$results.all$n.total, 
@@ -121,20 +118,7 @@ server = function(input,output){
     "Pr(success, best arm wins)" = round(runProgram()[["sobj"]]$results.all$pr.best.tx.success,5),
     check.names = F)
   })
-  # hide("goButton")
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 ui = fluidPage(
@@ -158,7 +142,7 @@ ui = fluidPage(
       
       # show sample size input
       # Box 2 | sample size
-      numericInput(inputId = "alpha", label = HTML("Critical value &alpha;"), value = 0.05, min = 0, max = 1, step = 0.01),
+      numericInput(inputId = "alpha", label = HTML("Critical value &alpha; (one-sided)"), value = 0.05, min = 0, max = 1, step = 0.01),
       numericInput(inputId = "totalSampleSize", label = "Total sample size", value = 100, step = 1, min = 10), 
       # uiOutput("totalSampleSize"), # dynamic min calculated
       
@@ -179,11 +163,12 @@ ui = fluidPage(
       ),
       
       numericInput(inputId = "threads", label = "Number of cores/threads", value = round(detectCores(all.tests = FALSE, logical = TRUE)/2), min = 1, max = detectCores(all.tests = FALSE, logical = TRUE), step = 1) # XXXXX set default to 1
-      
+      , width = 3      
     ),
     
     # power plot
     mainPanel(
+      htmlOutput(outputId = "alphaCI"),
       plotOutput(outputId = "powerPlot"),
       
       # "Best n1 n2 power:",
@@ -204,8 +189,6 @@ ui = fluidPage(
           numericInput(inputId = "thresholdFutility_epsilon", label = HTML("<font color='red'>&epsilon;</font> = ?"), value = 0, min = 0, max = 1, step = 0.1)
         ),
         
-        # numericInput(inputId = "superiority", label = HTML("Minimum treatment improvment:<br /> P(&mu;<sub>Best</sub> - &mu;<sub>Ctrl</sub> > <font color='red'>?</font>) > Th"), value = 0, min = 0), # max = 2*effect size
-        #uiOutput("superiority"), 
         numericInput(inputId = "checkSampleSize", label = "Number of checked sample sizes", value = 20, min = 10, step = 1),
         numericInput(inputId = "postSampleSize", label = "Post sample size", value = 1000, min = 100, step = 100), 
         numericInput(inputId = "simsH0", label = HTML("Simulation runs H<sub>0</sub>"), value = 1000, min = 100, step = 100), 
@@ -216,8 +199,8 @@ ui = fluidPage(
           numericInput(inputId = "seed", label = "Seed", value = 1234, min = 1, step = 1)
         )
       ), 
-      actionButton("goButton", "Go!")
-    ),
+      actionButton("goButton", "Go!"),
+      width = 3),
     
     mainPanel(
       # "Log:",
@@ -227,7 +210,6 @@ ui = fluidPage(
       checkboxInput(inputId = "showTable", label = "Show table"),
       conditionalPanel(
         condition = "input.showTable == 1",
-        # "tabular:",
         dataTableOutput(outputId = "powerTable")
       )
     )

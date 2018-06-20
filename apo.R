@@ -255,14 +255,14 @@ estimate.threshold = function(
 
   cth = predict(tmod,newdata=data.frame(A1=target_alpha,A2=target_alpha^2,A3=target_alpha^3))
   
-  plot(tabo$T,tabo$A)
-  abline(h=target_alpha,col="blue")
-  abline(v=cth,col="blue")
-  anew = seq(from=min(tabo$A),to=max(tabo$A),by=0.001)
-  lines(
-    predict(tmod,newdata=data.frame(A1=anew,A2=anew^2,A3=anew^3)),
-    anew, col="red"
-  )
+  #plot(tabo$T,tabo$A)
+  #abline(h=target_alpha,col="blue")
+  #abline(v=cth,col="blue")
+  #anew = seq(from=min(tabo$A),to=max(tabo$A),by=0.001)
+  #lines(
+  #  predict(tmod,newdata=data.frame(A1=anew,A2=anew^2,A3=anew^3)),
+  #  anew, col="red"
+  #)
   
   return(list(TH=cth,grid=tabo[,c("A","T")]))
 }
@@ -291,7 +291,7 @@ create.full.frequency.table = function(results,winners,ntx){
 # requires specification of treatment means (treatment 1 is control) and a target rejection threshold
 # returns the power estimate and a breakdown matrix containing the test result by winner arm frequency table
 get.power <- function(
-  threshold, target_alpha = 0.05, arm_mus, n_per_arm_I = 50, n_per_arm_II = 50, post_sample_size = 1000,
+  threshold, arm_mus, n_per_arm_I = 50, n_per_arm_II = 50, post_sample_size = 1000,
   simulation_runs_H1 = 5000, seed=-1, delta=0, epsilon=0
 )
 {
@@ -399,6 +399,16 @@ outcome.decomposition = function(breakdown_list, num_per_arm_I_schedule, arm_mus
   return( out )
 }
 
+
+#-----------------------------------------------------------------------------------------------------------------
+# two small utility functions used for boostrapping simulation error
+success.rate = function(rlist){
+  return( mean(rlist=="success") )
+}
+draw.bootstrap = function(foo,dat,size){
+  return( sample(dat,size,replace=TRUE) )
+}
+
 #-----------------------------------------------------------------------------------------------------------------
 # top level simulation function
 # assumes a fixed total sample size of patients can be allocated
@@ -474,7 +484,7 @@ optimize.power <- function(
 	  
       outp = get.power(
         threshold = threshold_estimated_phase_II[i],
-        target_alpha = target_alpha, arm_mus = arm_mus, n_per_arm_I = num_per_arm_I_schedule[i], 
+        arm_mus = arm_mus, n_per_arm_I = num_per_arm_I_schedule[i], 
         n_per_arm_II = floor((n_patients_TOTAL-(num_per_arm_I_schedule[i]*num_arms))/2), 
         post_sample_size=post_sample_size, simulation_runs_H1=simulation_runs_H1,
         seed=current_seed, delta=delta, epsilon=epsilon
@@ -521,12 +531,18 @@ optimize.power <- function(
   pred_n2 <- floor((n_patients_TOTAL - pred_n1*num_arms)/2)
   pred_nt <- pred_n1*num_arms + pred_n2*2
   predicted_performance = data.frame(
-    power=pred_pow, n.per.arm.I=pred_n1, n.per.arm.II=pred_n2, 
-	n.total=pred_nt, threshold=pred_th,
-	pr.futility = decomp_smooth$futility,
-	pr.best.tx.success = decomp_smooth$Txs.Best.Arms
+    power=pred_pow, 
+    power.low=pred_pow - qnorm(p=0.95) * sqrt(pred_pow*(1-pred_pow)/simulation_runs_H1),
+    power.high=pred_pow + qnorm(p=0.95) * sqrt(pred_pow*(1-pred_pow)/simulation_runs_H1),
+    n.per.arm.I=pred_n1, n.per.arm.II=pred_n2, 
+    n.total=pred_nt, threshold=pred_th,
+    pr.futility = decomp_smooth$futility,
+    pr.best.tx.success = decomp_smooth$Txs.Best.Arms
   )
+  
   best_row = predicted_performance[predicted_performance$power==max(predicted_performance$power),]
+  best_row$alpha.low = target_alpha - qnorm(p=0.95) * sqrt(target_alpha*(1-target_alpha)/simulation_runs_H0)
+  best_row$alpha.high = target_alpha + qnorm(p=0.95) * sqrt(target_alpha*(1-target_alpha)/simulation_runs_H0)
   
   return( list(
     results.all = predicted_performance,
